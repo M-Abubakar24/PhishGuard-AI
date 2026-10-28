@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.venv/
+venv/
+.env
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Generated model and data
+models/*.joblib
+data/*.csv
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
