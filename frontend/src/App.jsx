@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ShieldCheck,
   ShieldAlert,
@@ -19,63 +19,123 @@ const API_URL = "http://127.0.0.1:8000";
 
 function App() {
   const [url, setUrl] = useState("");
+  const [apiStatus, setApiStatus] = useState("checking");
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [history, setHistory] = useState([]);
+useEffect(() => {
+  let isMounted = true;
 
-  async function analyzeUrl(event) {
-    event.preventDefault();
-
-    const submittedUrl = url.trim();
-
-    if (!submittedUrl) {
-      setError("Please enter a URL to analyze.");
-      return;
-    }
-
-    setLoading(true);
-    setError("");
-    setResult(null);
-
+  async function checkApiStatus() {
     try {
-      const response = await fetch(`${API_URL}/predict`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ url: submittedUrl }),
-      });
-
-      const data = await response.json();
+      const response = await fetch(`${API_URL}/health`);
 
       if (!response.ok) {
-        throw new Error(
-          data.detail || "Unable to analyze this URL. Please try again."
-        );
+        throw new Error("API unavailable");
       }
 
-      setResult(data);
-
-      setHistory((previous) => [
-        {
-          id: `${Date.now()}-${Math.random()}`,
-          url: data.url || submittedUrl,
-          prediction: Number(data.predicted_class),
-          confidence: Number(data.confidence),
-          time: new Date().toLocaleTimeString(),
-        },
-        ...previous,
-      ].slice(0, 8));
-    } catch (err) {
-      setError(
-        err.message ||
-          "Cannot connect to the API. Check that your FastAPI backend is running."
-      );
-    } finally {
-      setLoading(false);
+      if (isMounted) {
+        setApiStatus("online");
+      }
+    } catch {
+      if (isMounted) {
+        setApiStatus("offline");
+      }
     }
   }
+
+  checkApiStatus();
+
+  const intervalId = setInterval(checkApiStatus, 15000);
+
+  return () => {
+    isMounted = false;
+    clearInterval(intervalId);
+  };
+}, []);
+
+async function analyzeUrl(event) {
+  event.preventDefault();
+
+  const submittedUrl = url.trim();
+
+  if (!submittedUrl) {
+    setError("Please enter a URL to analyze.");
+    setResult(null);
+    return;
+  }
+
+  let parsedUrl;
+
+  try {
+    parsedUrl = new URL(
+      /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(submittedUrl)
+        ? submittedUrl
+        : `https://${submittedUrl}`
+    );
+  } catch {
+    setError("Please enter a valid URL, such as example.com.");
+    setResult(null);
+    return;
+  }
+
+  if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+    setError("Only HTTP and HTTPS URLs are supported.");
+    setResult(null);
+    return;
+  }
+
+  if (!parsedUrl.hostname.includes(".")) {
+    setError("Please enter a complete domain, such as example.com.");
+    setResult(null);
+    return;
+  }
+
+  const normalizedUrl = parsedUrl.href;
+
+  setLoading(true);
+  setError("");
+  setResult(null);
+
+  try {
+    const response = await fetch(`${API_URL}/predict`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ url: normalizedUrl }),
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(
+        data.detail || "The URL could not be analyzed. Please try again."
+      );
+    }
+
+    setResult(data);
+
+    setHistory((previousHistory) => [
+      {
+        id: `${Date.now()}-${Math.random()}`,
+        url: normalizedUrl,
+        result: data,
+        time: new Date().toLocaleTimeString(),
+      },
+      ...previousHistory,
+    ].slice(0, 8));
+  } catch (error) {
+    setError(
+      error.message === "Failed to fetch"
+        ? "Cannot connect to the detection API. Check that your backend is running."
+        : error.message || "Something went wrong. Please try again."
+    );
+  } finally {
+    setLoading(false);
+  }
+}
 
   const isPhishing =
     result && Number(result.predicted_class) === 1;
@@ -118,13 +178,18 @@ function App() {
 
         <div className="sidebar-bottom">
           <div className="status-card">
-            <span className="status-dot" />
-            <div>
-              <strong>Detection API</strong>
-              <small>Connection checked on scan</small>
-            </div>
-          </div>
-
+  <span className={`status-dot ${apiStatus}`} />
+  <div>
+    <strong>Detection API</strong>
+    <small>
+      {apiStatus === "online"
+        ? "Connected and responding"
+        : apiStatus === "offline"
+          ? "Backend unavailable"
+          : "Checking connection..."}
+    </small>
+  </div>
+</div>
           <div className="sidebar-note">
             <LockKeyhole size={17} />
             <p>Analyze suspicious links without opening them.</p>
@@ -336,13 +401,62 @@ function App() {
         </section>
 
         <section className="history-card" id="history">
-          <div className="history-heading">
-            <div>
-              <h2>Recent scan history</h2>
-              <p>Your latest URL analyses in this session.</p>
-            </div>
-            <span className="history-count">{history.length} scans</span>
-          </div>
+<div className="history-heading">
+  <div>
+    <h2>Recent scan history</h2>
+    <p>Your latest URL analyses in this session.</p>
+  </div>
+
+<section className="security-info">
+  <div className="security-info-header">
+    <h2>About PhishGuard AI</h2>
+    <p>
+      Understand how the detection system helps identify potentially
+      suspicious URLs.
+    </p>
+  </div>
+
+  <div className="security-info-grid">
+    <article className="security-info-card">
+      <h3>URL Feature Analysis</h3>
+      <p>
+        Examines URL characteristics and extracted features to estimate
+        whether a link may be associated with phishing.
+      </p>
+    </article>
+
+    <article className="security-info-card">
+      <h3>Machine Learning</h3>
+      <p>
+        Uses a trained classification model to generate a prediction
+        and confidence score for submitted URLs.
+      </p>
+    </article>
+
+    <article className="security-info-card">
+      <h3>Security Disclaimer</h3>
+      <p>
+        Predictions are estimates, not guarantees. Avoid entering
+        passwords or sensitive information on untrusted websites.
+      </p>
+    </article>
+  </div>
+</section>
+
+  <div className="history-actions">
+    <span className="history-count">{history.length} scans</span>
+
+    {history.length > 0 && (
+      <button
+        type="button"
+        className="history-action-button"
+        onClick={() => setHistory([])}
+      >
+        Clear history
+      </button>
+    )}
+  </div>
+</div>
 
           {history.length === 0 ? (
             <div className="empty-history">
@@ -361,6 +475,7 @@ function App() {
                     <th>Classification</th>
                     <th>Confidence</th>
                     <th>Time</th>
+                    <th>Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -380,6 +495,24 @@ function App() {
                       </td>
                       <td>{(item.confidence * 100).toFixed(1)}%</td>
                       <td>{item.time}</td>
+<td>
+  <button
+    type="button"
+    className="history-action-button"
+    onClick={() => {
+      setUrl(item.url);
+      setError("");
+      setResult(null);
+      document.getElementById("scanner")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+      document.getElementById("url-input")?.focus();
+    }}
+  >
+    Rescan
+  </button>
+</td>
                     </tr>
                   ))}
                 </tbody>
